@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+DRY_RUN=0
+BACKUP_SUBDIR=""
+for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then DRY_RUN=1
+    else BACKUP_SUBDIR="$arg"
+    fi
+done
+
+# Read config baked in by Packer, then allow env var overrides.
+CONFIG_FILE="${HOMELAB_CONFIG:-/etc/homelab-restore.env}"
+[[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+
+COMPOSE_USER="${COMPOSE_USER:-}"
+COMPOSE_ROOT="${COMPOSE_ROOT:-/home/${COMPOSE_USER}/compose}"
+MOUNT_POINT="${MOUNT_POINT:-/mnt/nas}"
+NAS_IP="${NAS_IP:-}"
+NAS_SHARE="${NAS_SHARE:-homelab-backups}"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+stack_name_from_archive() {
+    echo "$1" | sed -E 's/_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}\.tar\.gz$//'
+}
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log "[DRY-RUN] Would mount //${NAS_IP}/${NAS_SHARE} at $MOUNT_POINT"
+    log "[DRY-RUN] Would restore from '${BACKUP_SUBDIR:-latest}' into $COMPOSE_ROOT"
+    exit 0
+fi
+
+[[ "$EUID" -ne 0 ]]  && { echo "Run as root (sudo)." >&2; exit 1; }
+[[ -z "$NAS_IP" ]]   && { echo "NAS_IP is not set. Check $CONFIG_FILE." >&2; exit 1; }
+[[ -z "$COMPOSE_USER" ]] && { echo "COMPOSE_USER is not set. Check $CONFIG_FILE." >&2; exit 1; }
+
+mkdir -p "$MOUNT_POINT"
+if ! mountpoint -q "$MOUNT_POINT"; then
+    log "Mounting ${NAS_IP}:/${NAS_SHARE}..."
+    mount -t nfs "${NAS_IP}:/${NAS_SHARE}" "$MOUNT_POINT"
+fi
+
+if [[ -z "$BACKUP_SUBDIR" ]]; then
+    BACKUP_SUBDIR="$(ls -1 "$MOUNT_POINT" | while read -r f; do [[ -d "$MOUNT_POINT/$f" ]] && echo "$f"; done | sort | tail -n1)"
+    log "No timestamp given, using latest: $BACKUP_SUBDIR"
+fi
+
+RESTORE_FROM="$MOUNT_POINT/$BACKUP_SUBDIR"
+[[ ! -d "$RESTORE_FROM" ]] && { log "ERROR: $RESTORE_FROM not found."; exit 1; }
+log "Restoring from: $RESTORE_FROM"
+
+mkdir -p "$COMPOSE_ROOT"
+
+shopt -s nullglob
+archives=("$RESTORE_FROM"/*.tar.gz)
+shopt -u nullglob
+[[ ${#archives[@]} -eq 0 ]] && { log "ERROR: no archives in $RESTORE_FROM"; exit 1; }
+
+RESTORED=()
+FAILED=()
+
+for archive in "${archives[@]}"; do
+    archive_file="$(basename "$archive")"
+    log "Extracting $archive_file"
+    if tar -xzf "$archive" -C "$COMPOSE_ROOT"; then
+        RESTORED+=("$(stack_name_from_archive "$archive_file")")
+    else
+        log "ERROR: failed to extract $archive_file"
+        FAILED+=("$archive_file")
+    fi
+done
+
+chown -R "$COMPOSE_USER:$COMPOSE_USER" "$COMPOSE_ROOT"
+
+for stack in "${RESTORED[@]}"; do
+    stack_path="$COMPOSE_ROOT/$stack"
+    [[ ! -f "$stack_path/docker-compose.yml" && ! -f "$stack_path/compose.yml" ]] && {
+        log "WARNING: $stack has no compose file after extraction, skipping"
+        continue
+    }
+    log "Starting $stack"
+    if ! (cd "$stack_path" && sudo -u "$COMPOSE_USER" docker compose up -d); then
+        log "ERROR: failed to start $stack"
+        FAILED+=("$stack")
+    fi
+done
+
+log "Restore complete. Restored: ${RESTORED[*]:-none}"
+[[ ${#FAILED[@]} -gt 0 ]] && { log "FAILURES: ${FAILED[*]}"; exit 1; }
+exit 0

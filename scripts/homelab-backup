@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+COMPOSE_ROOT="${COMPOSE_ROOT:-$HOME/compose}"
+BACKUP_DEST="${BACKUP_DEST:-/mnt/nas}"
+SKIP_STACKS="${SKIP_STACKS:-}"
+KEEP_LOCAL_COPIES="${KEEP_LOCAL_COPIES:-0}"
+LOG_FILE="${LOG_FILE:-$HOME/homelab-backup.log}"
+TIMESTAMP="$(date +%Y-%m-%d_%H-%M-%S)"
+DRY_RUN=0
+
+for arg in "$@"; do [[ "$arg" == "--dry-run" ]] && DRY_RUN=1; done
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+
+is_skipped() {
+    local stack="$1"
+    for skip in $SKIP_STACKS; do [[ "$skip" == "$stack" ]] && return 0; done
+    return 1
+}
+
+archive_name() { echo "${1}_${2}.tar.gz"; }
+
+[[ ! -d "$COMPOSE_ROOT" ]] && { log "ERROR: COMPOSE_ROOT '$COMPOSE_ROOT' not found."; exit 1; }
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log "[DRY-RUN] Would create $BACKUP_DEST/$TIMESTAMP and back up:"
+else
+    [[ ! -d "$BACKUP_DEST" ]] && { log "ERROR: BACKUP_DEST '$BACKUP_DEST' not mounted or not found."; exit 1; }
+    mkdir -p "$BACKUP_DEST/$TIMESTAMP"
+    log "Starting backup -> $BACKUP_DEST/$TIMESTAMP"
+fi
+
+FAILED=()
+SUCCEEDED=()
+
+for stack_path in "$COMPOSE_ROOT"/*/; do
+    stack="$(basename "$stack_path")"
+
+    is_skipped "$stack" && { log "Skipping $stack (SKIP_STACKS)"; continue; }
+
+    [[ ! -f "$stack_path/docker-compose.yml" && ! -f "$stack_path/compose.yml" ]] && {
+        log "Skipping $stack (no compose file)"
+        continue
+    }
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log "[DRY-RUN] Would stop, archive, copy, and restart: $stack"
+        SUCCEEDED+=("$stack")
+        continue
+    fi
+
+    log "--- $stack ---"
+
+    if ! (cd "$stack_path" && docker compose stop) >> "$LOG_FILE" 2>&1; then
+        log "WARNING: failed to stop $stack, archiving anyway"
+    fi
+
+    tmp_archive="/tmp/$(archive_name "$stack" "$TIMESTAMP")"
+
+    if tar -czf "$tmp_archive" -C "$COMPOSE_ROOT" "$stack" 2>> "$LOG_FILE"; then
+        if cp "$tmp_archive" "$BACKUP_DEST/$TIMESTAMP/"; then
+            SUCCEEDED+=("$stack")
+        else
+            log "ERROR: failed to copy archive for $stack"
+            FAILED+=("$stack")
+        fi
+    else
+        log "ERROR: failed to archive $stack"
+        FAILED+=("$stack")
+    fi
+
+    [[ "$KEEP_LOCAL_COPIES" != "1" ]] && rm -f "$tmp_archive"
+
+    if ! (cd "$stack_path" && docker compose start) >> "$LOG_FILE" 2>&1; then
+        log "WARNING: failed to restart $stack — check manually"
+    fi
+done
+
+log "Done. Succeeded: ${SUCCEEDED[*]:-none}"
+[[ ${#FAILED[@]} -gt 0 ]] && { log "FAILED: ${FAILED[*]}"; exit 1; }
+exit 0

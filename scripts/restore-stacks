@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/../.env"
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
+
+TEMPLATE_ID="${TEMPLATE_ID:-9000}"
+COMPOSE_USER="${COMPOSE_USER:-}"
+NAS_IP="${NAS_IP:-}"
+NAS_SHARE="${NAS_SHARE:-homelab-backups}"
+SSH_KEYS_URL="${SSH_KEYS_URL:-}"
+TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
+
+DRY_RUN=0
+NEW_VMID=""
+NEW_VM_NAME=""
+BACKUP_TIMESTAMP=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --vmid=*)             NEW_VMID="${arg#*=}" ;;
+        --name=*)             NEW_VM_NAME="${arg#*=}" ;;
+        --backup-timestamp=*) BACKUP_TIMESTAMP="${arg#*=}" ;;
+        --dry-run)            DRY_RUN=1 ;;
+    esac
+done
+
+[[ -z "$NEW_VMID" ]]    && { echo "Usage: $0 --vmid=<id> --name=<name> [--backup-timestamp=<ts>] [--dry-run]" >&2; exit 1; }
+[[ -z "$NEW_VM_NAME" ]] && { echo "Usage: $0 --vmid=<id> --name=<name> [--backup-timestamp=<ts>] [--dry-run]" >&2; exit 1; }
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+# Fetch SSH keys early — required even for dry run so we catch a bad URL before cloning.
+[[ -z "$SSH_KEYS_URL" ]] && { echo "SSH_KEYS_URL is not set. Check .env." >&2; exit 1; }
+SSH_KEYS="$(curl -fsSL "$SSH_KEYS_URL" 2>/dev/null | grep -v '^#' | grep -v '^$')" || true
+[[ -z "$SSH_KEYS" ]] && { echo "SSH_KEYS_URL returned no keys: $SSH_KEYS_URL" >&2; exit 1; }
+SSH_KEY_COUNT="$(echo "$SSH_KEYS" | wc -l | tr -d ' ')"
+
+SNIPPET_FILE="/var/lib/vz/snippets/restore-${NEW_VMID}.yaml"
+RESTORE_CMD="sudo /usr/local/bin/homelab-restore${BACKUP_TIMESTAMP:+ $BACKUP_TIMESTAMP}"
+
+if [[ "$DRY_RUN" == "1" ]]; then
+    log "[DRY-RUN] Would clone template $TEMPLATE_ID -> VM $NEW_VMID ($NEW_VM_NAME)"
+    log "[DRY-RUN] Would write cloud-init snippet to $SNIPPET_FILE"
+    log "[DRY-RUN] Snippet contents:"
+    log "[DRY-RUN]   ssh_authorized_keys: $SSH_KEY_COUNT key(s) from $SSH_KEYS_URL"
+    [[ -n "$TAILSCALE_AUTH_KEY" ]] && log "[DRY-RUN]   runcmd: tailscale up --auth-key=<key> --ssh"
+    log "[DRY-RUN]   runcmd: $RESTORE_CMD"
+    log "[DRY-RUN] Would attach snippet and start VM $NEW_VMID"
+    exit 0
+fi
+
+[[ -z "$NAS_IP" ]]       && { echo "NAS_IP is not set. Check .env." >&2; exit 1; }
+[[ -z "$COMPOSE_USER" ]] && { echo "COMPOSE_USER is not set. Check .env." >&2; exit 1; }
+
+log "Cloning VM $NEW_VMID ($NEW_VM_NAME) from template $TEMPLATE_ID..."
+qm clone "$TEMPLATE_ID" "$NEW_VMID" --name "$NEW_VM_NAME" --full
+
+log "Writing cloud-init snippet to $SNIPPET_FILE..."
+{
+    echo "#cloud-config"
+    echo "ssh_authorized_keys:"
+    while IFS= read -r key; do
+        echo "  - ${key}"
+    done <<< "$SSH_KEYS"
+    echo "runcmd:"
+    [[ -n "$TAILSCALE_AUTH_KEY" ]] && echo "  - tailscale up --auth-key=${TAILSCALE_AUTH_KEY} --ssh"
+    echo "  - ${RESTORE_CMD}"
+} > "$SNIPPET_FILE"
+chmod 600 "$SNIPPET_FILE"
+
+qm set "$NEW_VMID" --cicustom "user=local:snippets/restore-${NEW_VMID}.yaml"
+
+log "Starting VM $NEW_VMID..."
+qm start "$NEW_VMID"
+
+# The cloud-init ISO is generated from the snippet at boot time.
+# Delete it now so the Tailscale auth key doesn't sit on this host indefinitely.
+rm -f "$SNIPPET_FILE"
+
+log "Done. $NEW_VM_NAME is booting — stacks will restore automatically on first boot."
+log "Get the VM's IP: qm guest cmd $NEW_VMID network-get-interfaces"
+log "Watch progress:  ssh ${COMPOSE_USER}@<vm-ip> 'sudo journalctl -fu cloud-final'"

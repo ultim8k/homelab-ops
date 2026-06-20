@@ -1,0 +1,7 @@
+# Real env and secrets — never commit these
+.env
+*.pkrvars.hcl
+
+# Keep examples
+!*.env.example
+!*.pkrvars.hcl.example
