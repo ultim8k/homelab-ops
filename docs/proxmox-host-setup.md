@@ -182,6 +182,73 @@ Memory and CPU changes take effect after reboot, not immediately. A plain `qm re
 
 ---
 
+## Optional: Wake on LAN
+
+Allows the host to be powered on remotely by sending a magic packet from another device on the network.
+
+**Prerequisites:** WoL must be enabled in the BIOS/UEFI first — look for "Wake on LAN" or "Power on by PCI-E" in the network or power settings.
+
+Install `ethtool` if not already present:
+
+```bash
+sudo apt install ethtool -y
+```
+
+Test it manually first (replace `enp2s0f0` with your actual interface from `ip link`):
+
+```bash
+sudo ethtool -s enp2s0f0 wol g
+sudo ethtool enp2s0f0 | grep -i wake
+# Wake-on: g  ← means it worked
+```
+
+If that looks good, make it persistent with a systemd service:
+
+```bash
+sudo tee /etc/systemd/system/wol.service << 'EOF'
+[Unit]
+Description=Enable Wake on LAN
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ethtool -s enp2s0f0 wol g
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Enable and start it:
+
+```bash
+sudo systemctl enable --now wol.service
+```
+
+Verify WoL is active:
+
+```bash
+sudo ethtool enp2s0f0 | grep "Wake-on"
+# Wake-on: g  ← means enabled
+```
+
+Get the MAC address — you'll need it to send the magic packet:
+
+```bash
+ip link show enp2s0f0 | grep ether
+# link/ether aa:bb:cc:dd:ee:ff  ← this is your MAC address
+```
+
+To wake the host from another machine (macOS/Linux):
+
+```bash
+# Install if needed: brew install wakeonlan / apt install wakeonlan
+wakeonlan aa:bb:cc:dd:ee:ff
+```
+
+---
+
 ## Optional: USB Passthrough Host-Side Prep
 
 Only needed if you plan to pass a USB device through to a VM (e.g. a Bluetooth dongle for Home Assistant). The host must not claim the device itself or the VM will never see it.

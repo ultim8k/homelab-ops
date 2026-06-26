@@ -41,7 +41,7 @@ SNIPPET_FILE="/var/lib/vz/snippets/restore-${NEW_VMID}.yaml"
 RESTORE_CMD="sudo /usr/local/bin/homelab-restore${BACKUP_TIMESTAMP:+ $BACKUP_TIMESTAMP}"
 
 if [[ "$DRY_RUN" == "1" ]]; then
-    log "[DRY-RUN] Would clone template $TEMPLATE_ID -> VM $NEW_VMID ($NEW_VM_NAME)"
+    log "[DRY-RUN] Would clone template $TEMPLATE_ID -> VM $NEW_VMID ($NEW_VM_NAME) with onboot=1"
     log "[DRY-RUN] Would write cloud-init snippet to $SNIPPET_FILE"
     log "[DRY-RUN] Snippet contents:"
     log "[DRY-RUN]   ssh_authorized_keys: $SSH_KEY_COUNT key(s) from $SSH_KEYS_URL"
@@ -56,6 +56,7 @@ fi
 
 log "Cloning VM $NEW_VMID ($NEW_VM_NAME) from template $TEMPLATE_ID..."
 qm clone "$TEMPLATE_ID" "$NEW_VMID" --name "$NEW_VM_NAME" --full
+qm set "$NEW_VMID" --onboot 1
 
 log "Writing cloud-init snippet to $SNIPPET_FILE..."
 {

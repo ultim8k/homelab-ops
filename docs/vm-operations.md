@@ -34,6 +34,20 @@ free -h                      # on the Proxmox host
 sudo dmidecode -t memory     # confirms actual installed RAM
 ```
 
+## Auto-start on Host Boot
+
+```bash
+sudo qm set <vmid> --onboot 1
+```
+
+Verify:
+
+```bash
+sudo qm config <vmid> | grep onboot
+```
+
+Should return `onboot: 1`. To disable: `--onboot 0`.
+
 ## Modify In Place vs. Rebuild from Template
 
 **Modify in place** when the change is specific to one VM and you don't want it in every future clone — e.g. installing a kernel module for USB passthrough on one stack's VM.
