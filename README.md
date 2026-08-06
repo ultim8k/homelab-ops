@@ -1,3 +1,5 @@
+<img src="./assets/logo.svg" alt="servers stack" height="300">
+
 # homelab-ops
 
 Everything needed to run, back up, and rebuild a Proxmox-based homelab from scratch.

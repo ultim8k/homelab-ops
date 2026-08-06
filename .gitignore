@@ -1,6 +1,7 @@
 # Real env and secrets — never commit these
 .env
 *.pkrvars.hcl
+.DS_Store
 
 # Keep examples
 !*.env.example

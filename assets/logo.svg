@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="homelab-ops logo">
+  <defs>
+    <g id="server-block">
+      <polygon points="-108,0 0,-20 108,0 0,20" fill="#4a5068"/>
+      <polygon points="-105,0 0,-19 105,0 0,19" fill="#404558"/>
+      <polygon points="-108,0 0,20 0,66 -108,46" fill="#262a38"/>
+      <polygon points="108,0 0,20 0,66 108,46" fill="#323647"/>
+
+      <g id="server_panel" transform="translate(35 21) rotate(-10) skewX(-9)" opacity="0.8">
+        <rect x="0" y="0" width="65" height="30" fill="#111111" rx="3" ry="3"/>
+      </g>
+
+      <g id="x_logo" transform="translate(-80 28) rotate(10) skewX(10)">
+        <rect x="-12" y="-12" width="4.8" height="4.8" fill="#e57000"/>
+        <rect x="-7.2" y="-7.2" width="4.8" height="4.8" fill="#e57000"/>
+        <rect x="2.4" y="2.4" width="4.8" height="4.8" fill="#e57000"/>
+        <rect x="7.2" y="7.2" width="4.8" height="4.8" fill="#e57000"/>
+        <rect x="7.2" y="-12" width="4.8" height="4.8" fill="#f4f4f4"/>
+        <rect x="2.4" y="-7.2" width="4.8" height="4.8" fill="#f4f4f4"/>
+        <rect x="-2.4" y="-2.4" width="4.8" height="4.8" fill="#f4f4f4"/>
+        <rect x="-7.2" y="2.4" width="4.8" height="4.8" fill="#f4f4f4"/>
+        <rect x="-12" y="7.2" width="4.8" height="4.8" fill="#f4f4f4"/>
+      </g>
+
+      <g id="server_leds_buttons" transform="translate(45 35) rotate(-10) skewX(-8)">
+        <rect x="0" y="-6.75" width="4.5" height="13.5" fill="var(--led-1, #111)" rx="1" ry="1"/>
+        <rect x="9" y="-6.75" width="4.5" height="13.5" fill="var(--led-2, #111)" rx="1" ry="1"/>
+        <rect x="18" y="-6.75" width="4.5" height="13.5" fill="var(--led-3, #111)" rx="1" ry="1"/>
+        <circle cx="40.5" cy="0" r="6.5" fill="#e57000"/>
+      </g>
+    </g>
+  
+    <filter id="f_blur_1" x="0" y="0" xmlns="http://www.w3.org/2000/svg">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" />
+    </filter>
+  </defs>
+
+  <g transform="translate(256 256) scale(1.15) translate(-256 -256)">
+    <g transform="translate(256 342)">
+      <polygon points="-118,0 0,-28 118,0 0,28" fill="#000000" opacity="0.35" filter="url(#f_blur_1)"/>
+    </g>
+
+    <g transform="translate(256 210)">
+      <g transform="translate(0 55)" style="--led-1:#32cd32; --led-2:#32cd32; --led-3:#32cd32">
+        <use href="#server-block"/>
+      </g>
+      <g transform="translate(0 0)" style="--led-1:#32cd32; --led-2:#663399; --led-3:#663399">
+        <use href="#server-block"/>
+      </g>
+      <g transform="translate(0 -55)" style="--led-1:#32cd32; --led-2:#32cd32; --led-3:#663399">
+        <use href="#server-block"/>
+      </g>
+    </g>
+  </g>
+</svg>
