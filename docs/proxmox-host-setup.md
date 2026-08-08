@@ -279,3 +279,67 @@ After reboot:
 lsmod | grep btusb    # should be empty
 lsusb -t              # device should show Driver=[none]
 ```
+
+---
+
+## Optional: UPS Monitoring via NUT (network client)
+
+If the UPS is physically attached to another machine on the network (e.g. a Synology NAS with network UPS sharing enabled) rather than to the Proxmox host, the host can still monitor it and shut itself down safely on low battery. Synology's UPS sharing feature runs a standard NUT (Network UPS Tools) server under the hood, so the Proxmox host just needs `nut-client` configured to talk to it over the network.
+
+**On the NAS (DSM):** Control Panel → Hardware & Power → UPS → enable the network UPS server, and add the Proxmox host's IP to the permitted-clients list (despite the "DiskStation/Synology NAS units" wording, this ACL applies to any NUT client, not just other Synology devices). DSM doesn't expose a settable NUT password in the GUI — third-party clients use a fixed built-in account, commonly `monuser` / `secret`. Verify it actually works before trusting it in `upsmon.conf`:
+
+```bash
+printf 'USERNAME monuser\nPASSWORD secret\nLOGIN <upsname>\n' | nc <nas-ip> 3493
+# OK / OK / OK  ← credentials and UPS name are all valid
+```
+
+**On the Proxmox host:**
+
+If this host previously had the UPS attached directly (a local `nut-server` + driver running in `MODE=standalone`), remove that first so it doesn't fight with the client config below:
+
+```bash
+sudo systemctl disable --now nut-driver@<upsname>.service
+sudo systemctl disable --now nut-server.service
+sudo apt purge nut-server -y
+```
+
+Then delete the corresponding `[<upsname>]` stanza from `/etc/nut/ups.conf`.
+
+```bash
+sudo apt install nut-client -y
+```
+
+Find the UPS name the server exposes:
+
+```bash
+upsc -l <nas-ip>
+```
+
+Confirm you can read live status (battery charge, load, `OL`/`OB` state):
+
+```bash
+upsc <upsname>@<nas-ip>
+```
+
+Set client mode in `/etc/nut/nut.conf`:
+
+```
+MODE=netclient
+```
+
+In `/etc/nut/upsmon.conf`, add a `MONITOR` line pointing at the NAS and set the shutdown command:
+
+```
+MONITOR <upsname>@<nas-ip> 1 monuser <password> slave
+SHUTDOWNCMD "/sbin/shutdown -h +0"
+```
+
+No custom shutdown script is needed — Proxmox's own `pve-guests` service already stops running VMs (respecting the Start/Shutdown order under **Datacenter → Options**) as part of any normal host shutdown, including one triggered this way. Just make sure each VM's shutdown timeout leaves enough runtime on the UPS to finish before the host halts.
+
+Enable and start the client:
+
+```bash
+sudo systemctl enable --now nut-monitor.service
+```
+
+Check `journalctl -u nut-monitor` after a moment to confirm it connected and is polling status.
